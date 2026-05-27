@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html lang="mn">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Дэлхийн Өгөгдөл</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/topojson/3.0.2/topojson.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Bebas+Neue&display=swap');
+
+:root {
+  --bg: #030810;
+  --surface: #071220;
+  --border: rgba(0,200,255,0.12);
+  --accent: #00c8ff;
+  --accent2: #ff5533;
+  --accent3: #44ff88;
+  --accent4: #ffcc00;
+  --text: #cce8f0;
+  --muted: #3a5a6a;
+  --sidebar: 300px;
+}
+
+* { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+html,body { width:100%; height:100%; background:var(--bg); color:var(--text); font-family:'Space Mono',monospace; overflow:hidden; }
+
+/* ── LAYOUT ── */
+#app {
+  display: grid;
+  grid-template-rows: 56px 44px 1fr;
+  grid-template-columns: 1fr var(--sidebar);
+  width: 100vw; height: 100vh;
+}
+
+/* ── HEADER ── */
+header {
+  grid-column: 1/-1;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(3,8,16,0.95);
+  backdrop-filter: blur(12px);
+  z-index: 50;
+}
+.logo { display:flex; align-items:baseline; gap:10px; }
+.logo h1 {
+  font-family:'Bebas Neue',sans-serif; font-size:clamp(18px,3vw,26px);
+  letter-spacing:3px;
+  background:linear-gradient(90deg,var(--accent),#fff);
+  -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text;
+}
+.logo sub { font-size:9px; color:var(--muted); letter-spacing:2px; text-transform:uppercase; }
+
+.hstats { display:flex; gap:20px; }
+.hs { text-align:right; }
+.hs-v { font-family:'Bebas Neue',sans-serif; font-size:clamp(16px,2.5vw,22px); color:var(--accent); text-shadow:0 0 10px rgba(0,200,255,0.35); }
+.hs-l { font-size:8px; color:var(--muted); letter-spacing:2px; text-transform:uppercase; }
+
+/* ── CATEGORY BAR ── */
+#catbar {
+  grid-column: 1/-1;
+  display: flex; align-items: center; gap: 0;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(5,12,22,0.98);
+  overflow-x: auto; overflow-y: hidden;
+  scrollbar-width: none;
+  z-index: 40;
+}
+#catbar::-webkit-scrollbar { display:none; }
+
+.cat-btn {
+  display: flex; align-items: center; gap: 6px;
+  padding: 0 14px; height: 44px;
+  white-space: nowrap;
+  font-family:'Space Mono',monospace; font-size:10px; letter-spacing:1px;
+  text-transform:uppercase;
+  background:none; border:none; border-bottom:2px solid transparent;
+  color:var(--muted); cursor:pointer; transition:all 0.2s;
+  flex-shrink: 0;
+}
+.cat-btn:hover { color:var(--text); }
+.cat-btn.on { color:var(--accent); border-bottom-color:var(--accent); }
+.cat-icon { font-size:14px; }
+
+/* ── MAP ── */
+#map-area {
+  position:relative; overflow:hidden;
+  background: radial-gradient(ellipse at center, #060f1e 0%, #030810 100%);
+}
+#world-svg { width:100%; height:100%; cursor:grab; display:block; }
+#world-svg:active { cursor:grabbing; }
+
+.country-path { stroke:rgba(0,200,255,0.15); stroke-width:0.4; cursor:pointer; transition:filter 0.15s; }
+.country-path:hover { stroke:var(--accent); stroke-width:1; filter:brightness(1.7); }
+.country-path.sel { stroke:var(--accent2); stroke-width:1.6; filter:brightness(1.9) drop-shadow(0 0 5px rgba(255,85,51,0.5)); }
+.graticule { fill:none; stroke:rgba(0,200,255,0.04); stroke-width:0.5; }
+.sphere { fill:#040d1a; }
+.borders { fill:none; stroke:rgba(0,200,255,0.1); stroke-width:0.3; }
+
+/* map overlays */
+.map-ctrl {
+  position:absolute; display:flex; gap:4px;
+}
+.zoom-wrap { bottom:16px; left:16px; flex-direction:column; }
+.proj-wrap { top:10px; left:10px; }
+.map-ctrl button, .proj-sel {
+  background:rgba(5,14,28,0.92); border:1px solid var(--border);
+  color:var(--accent); font-family:'Space Mono',monospace; font-size:10px;
+  cursor:pointer; border-radius:3px; transition:all 0.15s;
+}
+.map-ctrl button { width:30px; height:30px; font-size:16px; display:flex; align-items:center; justify-content:center; }
+.map-ctrl button:hover { background:rgba(0,200,255,0.1); border-color:var(--accent); }
+.proj-sel { padding:5px 8px; outline:none; letter-spacing:1px; }
+
+/* ── SIDEBAR ── */
+#sidebar {
+  border-left:1px solid var(--border);
+  display:flex; flex-direction:column;
+  background:rgba(4,10,20,0.98);
+  overflow:hidden;
+}
+.sb-info {
+  padding:14px 16px;
+  border-bottom:1px solid var(--border);
+  min-height:96px; display:flex; flex-direction:column; justify-content:center;
+  flex-shrink:0;
+}
+.sb-empty { font-size:10px; color:var(--muted); font-style:italic; }
+.sb-name { font-family:'Bebas Neue',sans-serif; font-size:22px; color:#fff; line-height:1; margin-bottom:3px; }
+.sb-main { font-size:20px; font-weight:700; color:var(--accent); text-shadow:0 0 8px rgba(0,200,255,0.3); }
+.sb-unit { font-size:9px; color:var(--muted); }
+.sb-grid { display:grid; grid-template-columns:1fr 1fr; gap:5px; margin-top:6px; }
+.sb-kv { font-size:9px; color:var(--muted); }
+.sb-kv span { color:var(--text); font-size:10px; display:block; }
+
+.sb-head { padding:10px 16px 8px; border-bottom:1px solid var(--border); flex-shrink:0; }
+.sb-head-title { font-family:'Bebas Neue',sans-serif; font-size:13px; letter-spacing:3px; color:var(--accent); }
+
+.rank-list { flex:1; overflow-y:auto; scrollbar-width:thin; scrollbar-color:var(--muted) transparent; }
+.rank-row {
+  display:grid; grid-template-columns:24px 1fr 72px;
+  align-items:center; gap:7px; padding:7px 16px;
+  border-left:3px solid transparent; cursor:pointer; transition:all 0.12s;
+}
+.rank-row:hover { background:rgba(0,200,255,0.04); border-left-color:var(--accent); }
+.rank-row.active { background:rgba(255,85,51,0.07); border-left-color:var(--accent2); }
+.rn { font-size:10px; font-weight:700; color:var(--muted); text-align:center; }
+.rn.g { color:#ffd700; } .rn.s { color:#c0c0c0; } .rn.b { color:#cd7f32; }
+.ri-name { font-size:11px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-bottom:3px; }
+.ri-bar { height:2px; background:rgba(255,255,255,0.05); border-radius:1px; overflow:hidden; }
+.ri-fill { height:100%; border-radius:1px; transition:width 0.4s; }
+.rval { font-size:10px; font-weight:700; color:var(--accent); text-align:right; white-space:nowrap; }
+
+.legend-box { padding:10px 16px; border-top:1px solid var(--border); flex-shrink:0; }
+.leg-title { font-size:8px; letter-spacing:2px; text-transform:uppercase; color:var(--muted); margin-bottom:5px; }
+.leg-grad { height:6px; border-radius:3px; }
+.leg-labels { display:flex; justify-content:space-between; font-size:8px; color:var(--muted); margin-top:3px; }
+
+/* ── TOOLTIP ── */
+#tip {
+  position:fixed; background:rgba(4,12,24,0.97); border:1px solid var(--accent);
+  border-radius:4px; padding:10px 14px; font-size:11px;
+  pointer-events:none; opacity:0; transition:opacity 0.1s; z-index:9999;
+  box-shadow:0 0 20px rgba(0,200,255,0.2); min-width:140px; max-width:200px;
+}
+#tip.show { opacity:1; }
+#tip .tn { font-family:'Bebas Neue',sans-serif; font-size:15px; color:var(--accent); margin-bottom:3px; }
+#tip .tv { font-size:13px; font-weight:700; color:#fff; }
+#tip .ts { font-size:9px; color:var(--muted); margin-top:2px; }
+
+/* ── MOBILE OVERLAY PANEL ── */
+#mob-panel {
+  display:none;
+  position:fixed; bottom:0; left:0; right:0; z-index:200;
+  background:rgba(4,10,20,0.98);
+  border-top:1px solid var(--border);
+  border-radius:16px 16px 0 0;
+  padding:12px 0 0;
+  max-height:55vh;
+  flex-direction:column;
+  backdrop-filter:blur(20px);
+}
+.mob-drag { width:40px; height:4px; background:var(--muted); border-radius:2px; margin:0 auto 10px; }
+.mob-info { padding:10px 18px 12px; border-bottom:1px solid var(--border); }
+.mob-name { font-family:'Bebas Neue',sans-serif; font-size:24px; color:#fff; }
+.mob-val { font-size:22px; font-weight:700; color:var(--accent); }
+.mob-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:8px; }
+.mob-kv { font-size:9px; color:var(--muted); }
+.mob-kv span { color:var(--text); font-size:11px; display:block; font-weight:700; }
+.mob-rank { flex:1; overflow-y:auto; padding:0; }
+#mob-close {
+  position:absolute; top:14px; right:16px;
+  background:none; border:none; color:var(--muted); font-size:20px; cursor:pointer;
+}
+
+/* ── RESPONSIVE ── */
+@media (max-width: 700px) {
+  :root { --sidebar: 0px; }
+  #app { grid-template-columns: 1fr; grid-template-rows: 52px 40px 1fr; }
+  #sidebar { display:none; }
+  #mob-panel { display:flex; }
+  .hstats { gap:12px; }
+  .hs-v { font-size:15px; }
+  #catbar { padding:0 8px; }
+  .cat-btn { padding:0 10px; font-size:9px; }
+  .cat-icon { font-size:12px; }
+  .zoom-wrap { bottom:12px; left:12px; }
+  .proj-wrap { display:none; }
+}
+
+@media (min-width:701px) {
+  #mob-panel { display:none !important; }
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="logo">
+      <h1>ДЭЛХИЙ</h1>
+      <sub>Data Atlas · 2024</sub>
+    </div>
+    <div class="hstats">
+      <div class="hs"><div class="hs-v" id="h-val">8,119,000,000</div><div class="hs-l" id="h-lbl">Нийт хүн ам</div></div>
+      <div class="hs"><div class="hs-v">195</div><div class="hs-l">Улс орон</div></div>
+    </div>
+  </header>
+
+  <div id="catbar">
+    <button class="cat-btn on" onclick="setCat('pop',this)"><span class="cat-icon">👥</span>Хүн ам</button>
+    <button class="cat-btn" onclick="setCat('density',this)"><span class="cat-icon">📍</span>Нягтрал</button>
+    <button class="cat-btn" onclick="setCat('growth',this)"><span class="cat-icon">📈</span>Өсөлт</button>
+    <button class="cat-btn" onclick="setCat('gdp',this)"><span class="cat-icon">💰</span>ДНБ/хүн</button>
+    <button class="cat-btn" onclick="setCat('hdi',this)"><span class="cat-icon">🎓</span>HDI</button>
+    <button class="cat-btn" onclick="setCat('life',this)"><span class="cat-icon">❤️</span>Наслалт</button>
+    <button class="cat-btn" onclick="setCat('co2',this)"><span class="cat-icon">🌱</span>CO₂</button>
+    <button class="cat-btn" onclick="setCat('internet',this)"><span class="cat-icon">🌐</span>Интернет</button>
+  </div>
+
+  <div id="map-area">
+    <svg id="world-svg"></svg>
+    <div class="map-ctrl proj-wrap">
+      <select class="proj-sel" id="proj-sel" onchange="changeProjection(this.value)">
+        <option value="natural">Natural Earth</option>
+        <option value="mercator">Mercator</option>
+        <option value="ortho">Orthographic</option>
+        <option value="equal">Equal Earth</option>
+      </select>
+    </div>
+    <div class="map-ctrl zoom-wrap">
+      <button onclick="zoomIn()">+</button>
+      <button onclick="zoomReset()">⊙</button>
+      <button onclick="zoomOut()">−</button>
+    </div>
+  </div>
+
+  <div id="sidebar">
+    <div class="sb-info" id="sb-info">
+      <div class="sb-empty">↑ Газрын зурагт улс дарна уу</div>
+    </div>
+    <div class="sb-head"><div class="sb-head-title" id="sb-rank-title">ТОП УЛСУУД · ХҮН АМ</div></div>
+    <div class="rank-list" id="rank-list"></div>
+    <div class="legend-box">
+      <div class="leg-title" id="leg-title">Хүн амын хэмжээ</div>
+      <div class="leg-grad" id="leg-grad"></div>
+      <div class="leg-labels" id="leg-labels"><span>Бага</span><span>Дунд</span><span>Их</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- Mobile bottom panel -->
+<div id="mob-panel">
+  <div class="mob-drag"></div>
+  <button id="mob-close" onclick="closeMobPanel()">✕</button>
+  <div class="mob-info" id="mob-info" style="display:none">
+    <div class="mob-name" id="mob-name"></div>
+    <div class="mob-val" id="mob-val"></div>
+    <div class="mob-grid" id="mob-grid"></div>
+  </div>
+  <div class="mob-rank rank-list" id="mob-rank-list"></div>
+</div>
+
+<div id="tip">
+  <div class="tn" id="t-name"></div>
+  <div class="tv" id="t-val"></div>
+  <div class="ts" id="t-sub"></div>
+</div>
+
+<script>
+// ── DATA ──
+const CATS = {
+  pop:     { label:'Хүн ам',      unit:'хүн',        header:'Нийт хүн ам',      colorA:'#071a2a', colorB:'#00c8ff', log:true,  fmt: v => v>=1000?(v/1000).toFixed(2)+' тэрбум':v>=1?(v).toFixed(1)+' сая':v.toFixed(2)+' сая' },
+  density: { label:'Нягтрал',     unit:'/км²',        header:'Хүн/км²',          colorA:'#071620', colorB:'#44aaff', log:true,  fmt: v => v.toFixed(0)+' /км²' },
+  growth:  { label:'Өсөлт',       unit:'%/жил',       header:'Хүн амын өсөлт',   colorA:'#1a0700', colorB:'#44ff88', log:false, fmt: v => (v>0?'+':'')+v.toFixed(2)+'%' },
+  gdp:     { label:'ДНБ/хүн',     unit:'USD',         header:'ДНБ нэг хүнд',     colorA:'#0d1000', colorB:'#ffcc00', log:true,  fmt: v => '$'+v.toLocaleString() },
+  hdi:     { label:'HDI',         unit:'индекс',      header:'Хүний хөгжлийн индекс', colorA:'#100010', colorB:'#cc44ff', log:false, fmt: v => v.toFixed(3) },
+  life:    { label:'Наслалт',     unit:'жил',         header:'Дундаж наслалт',   colorA:'#001015', colorB:'#00ffcc', log:false, fmt: v => v.toFixed(1)+' жил' },
+  co2:     { label:'CO₂',         unit:'тн/хүн',      header:'CO₂ ялгаруулалт', colorA:'#050000', colorB:'#ff3300', log:true,  fmt: v => v.toFixed(1)+' тн/хүн' },
+  internet:{ label:'Интернет',    unit:'%',           header:'Интернет хэрэглэгч', colorA:'#001020', colorB:'#00e5ff', log:false, fmt: v => v.toFixed(0)+'%' },
+};
+
+const D = {
+  "004":{n:"Афганистан",   pop:43,    density:60,   growth:2.3,  gdp:370,    hdi:0.478, life:64.5, co2:0.3,  internet:18},
+  "008":{n:"Албани",       pop:2.8,   density:103,  growth:0.2,  gdp:6800,   hdi:0.796, life:78.5, co2:1.7,  internet:79},
+  "012":{n:"Алжир",        pop:46,    density:19,   growth:1.5,  gdp:3800,   hdi:0.745, life:77.1, co2:3.9,  internet:71},
+  "024":{n:"Ангол",        pop:36,    density:29,   growth:3.3,  gdp:2700,   hdi:0.586, life:62.4, co2:0.8,  internet:33},
+  "032":{n:"Аргентин",     pop:46,    density:17,   growth:0.8,  gdp:10800,  hdi:0.842, life:76.7, co2:4.2,  internet:88},
+  "036":{n:"Австрали",     pop:26,    density:3,    growth:1.8,  gdp:62500,  hdi:0.946, life:83.4, co2:14.9, internet:91},
+  "040":{n:"Австри",       pop:9.1,   density:109,  growth:0.7,  gdp:53400,  hdi:0.916, life:81.8, co2:7.4,  internet:93},
+  "050":{n:"Бангладеш",    pop:172,   density:1265, growth:1.0,  gdp:2800,   hdi:0.661, life:72.4, co2:0.6,  internet:44},
+  "056":{n:"Бельги",       pop:11.7,  density:383,  growth:0.5,  gdp:47000,  hdi:0.919, life:82.0, co2:8.1,  internet:93},
+  "068":{n:"Боливи",       pop:12,    density:11,   growth:1.4,  gdp:3500,   hdi:0.703, life:71.5, co2:2.0,  internet:60},
+  "076":{n:"Бразил",       pop:216,   density:25,   growth:0.6,  gdp:9800,   hdi:0.754, life:75.9, co2:2.4,  internet:84},
+  "100":{n:"Болгар",       pop:6.5,   density:59,   growth:-0.7, gdp:12500,  hdi:0.795, life:75.5, co2:6.4,  internet:79},
+  "104":{n:"Мьянмар",      pop:54,    density:83,   growth:0.7,  gdp:1200,   hdi:0.585, life:66.8, co2:0.6,  internet:43},
+  "116":{n:"Камбож",       pop:17,    density:96,   growth:1.1,  gdp:1800,   hdi:0.593, life:70.0, co2:0.8,  internet:49},
+  "120":{n:"Камерун",      pop:28,    density:58,   growth:2.6,  gdp:1500,   hdi:0.563, life:60.3, co2:0.4,  internet:36},
+  "124":{n:"Канад",        pop:38,    density:4,    growth:1.5,  gdp:52400,  hdi:0.936, life:82.3, co2:15.4, internet:94},
+  "152":{n:"Чили",         pop:19.5,  density:26,   growth:0.7,  gdp:15800,  hdi:0.855, life:80.2, co2:4.7,  internet:90},
+  "156":{n:"Хятад",        pop:1425,  density:151,  growth:-0.1, gdp:13700,  hdi:0.788, life:78.2, co2:8.0,  internet:77},
+  "170":{n:"Колумб",       pop:52,    density:47,   growth:0.9,  gdp:6500,   hdi:0.752, life:77.3, co2:1.9,  internet:73},
+  "178":{n:"Конго",        pop:6.1,   density:17,   growth:2.4,  gdp:2100,   hdi:0.571, life:65.5, co2:0.8,  internet:32},
+  "180":{n:"Конго (ДБ)",   pop:101,   density:44,   growth:3.1,  gdp:600,    hdi:0.479, life:60.7, co2:0.1,  internet:28},
+  "191":{n:"Хорватиа",     pop:3.9,   density:69,   growth:-0.3, gdp:17000,  hdi:0.858, life:78.6, co2:4.2,  internet:84},
+  "192":{n:"Куба",         pop:11.2,  density:101,  growth:-0.2, gdp:9000,   hdi:0.764, life:78.8, co2:2.0,  internet:74},
+  "203":{n:"Чех",          pop:10.9,  density:139,  growth:0.3,  gdp:27200,  hdi:0.900, life:79.4, co2:9.2,  internet:88},
+  "208":{n:"Дани",         pop:5.9,   density:137,  growth:0.5,  gdp:68100,  hdi:0.948, life:81.6, co2:5.8,  internet:99},
+  "214":{n:"Доминикан",    pop:11.3,  density:232,  growth:1.0,  gdp:9000,   hdi:0.767, life:74.3, co2:2.5,  internet:77},
+  "218":{n:"Эквадор",      pop:18.2,  density:72,   growth:1.4,  gdp:6200,   hdi:0.740, life:77.0, co2:2.7,  internet:77},
+  "818":{n:"Египет",       pop:106,   density:103,  growth:1.8,  gdp:3500,   hdi:0.731, life:72.0, co2:2.5,  internet:72},
+  "231":{n:"Этиоп",        pop:128,   density:115,  growth:2.5,  gdp:1000,   hdi:0.498, life:66.6, co2:0.1,  internet:24},
+  "246":{n:"Финланд",      pop:5.6,   density:18,   growth:0.2,  gdp:50900,  hdi:0.940, life:82.0, co2:7.5,  internet:93},
+  "250":{n:"Франц",        pop:68,    density:119,  growth:0.3,  gdp:43800,  hdi:0.903, life:82.3, co2:5.2,  internet:87},
+  "276":{n:"Герман",       pop:84,    density:240,  growth:0.3,  gdp:48400,  hdi:0.942, life:81.3, co2:8.1,  internet:91},
+  "288":{n:"Гана",         pop:34,    density:148,  growth:2.2,  gdp:2300,   hdi:0.632, life:64.1, co2:0.6,  internet:58},
+  "300":{n:"Грек",         pop:10.4,  density:79,   growth:-0.4, gdp:20400,  hdi:0.887, life:82.2, co2:6.4,  internet:87},
+  "320":{n:"Гватемал",     pop:18,    density:166,  growth:1.8,  gdp:4600,   hdi:0.627, life:74.3, co2:1.2,  internet:55},
+  "332":{n:"Гаити",        pop:11.7,  density:422,  growth:1.3,  gdp:1400,   hdi:0.535, life:64.0, co2:0.3,  internet:38},
+  "340":{n:"Гондурас",     pop:10.6,  density:95,   growth:1.5,  gdp:2800,   hdi:0.621, life:74.9, co2:1.1,  internet:53},
+  "348":{n:"Унгар",        pop:9.7,   density:104,  growth:-0.2, gdp:18900,  hdi:0.846, life:76.7, co2:5.1,  internet:89},
+  "356":{n:"Энэтхэг",      pop:1441,  density:464,  growth:0.9,  gdp:2400,   hdi:0.633, life:70.2, co2:2.0,  internet:52},
+  "360":{n:"Индонези",     pop:278,   density:153,  growth:1.0,  gdp:4700,   hdi:0.705, life:71.7, co2:2.3,  internet:77},
+  "364":{n:"Иран",         pop:89,    density:54,   growth:1.1,  gdp:7600,   hdi:0.774, life:77.3, co2:8.8,  internet:84},
+  "368":{n:"Ирак",         pop:43,    density:99,   growth:2.3,  gdp:6000,   hdi:0.686, life:70.6, co2:4.5,  internet:78},
+  "372":{n:"Ирланд",       pop:5.1,   density:72,   growth:1.0,  gdp:99100,  hdi:0.945, life:82.4, co2:8.2,  internet:93},
+  "376":{n:"Израиль",      pop:9.2,   density:418,  growth:1.7,  gdp:54300,  hdi:0.919, life:82.6, co2:6.2,  internet:90},
+  "380":{n:"Итали",        pop:59,    density:200,  growth:-0.2, gdp:34000,  hdi:0.895, life:83.4, co2:5.8,  internet:86},
+  "392":{n:"Япон",         pop:124,   density:340,  growth:-0.4, gdp:33800,  hdi:0.920, life:84.3, co2:9.0,  internet:93},
+  "398":{n:"Казахстан",    pop:19,    density:7,    growth:1.1,  gdp:10700,  hdi:0.802, life:73.2, co2:14.1, internet:90},
+  "404":{n:"Кени",         pop:55,    density:97,   growth:2.2,  gdp:2100,   hdi:0.601, life:66.7, co2:0.4,  internet:29},
+  "410":{n:"Өмнөд Солонгос",pop:52,  density:527,  growth:0.1,  gdp:35000,  hdi:0.925, life:83.5, co2:12.2, internet:97},
+  "408":{n:"Хойд Солонгос",pop:25.9,  density:215,  growth:0.4,  gdp:1800,   hdi:0.733, life:72.6, co2:3.3,  internet:1},
+  "414":{n:"Кувейт",       pop:4.4,   density:247,  growth:1.6,  gdp:32000,  hdi:0.831, life:77.6, co2:25.0, internet:100},
+  "418":{n:"Лаос",         pop:7.5,   density:32,   growth:1.4,  gdp:2700,   hdi:0.607, life:68.2, co2:1.1,  internet:49},
+  "430":{n:"Либери",       pop:5.2,   density:53,   growth:2.5,  gdp:700,    hdi:0.481, life:64.1, co2:0.2,  internet:26},
+  "434":{n:"Ливи",         pop:7.2,   density:4,    growth:1.4,  gdp:6800,   hdi:0.718, life:73.0, co2:9.8,  internet:83},
+  "450":{n:"Мадагаскар",   pop:29,    density:50,   growth:2.7,  gdp:520,    hdi:0.501, life:67.0, co2:0.2,  internet:20},
+  "466":{n:"Мали",         pop:23,    density:19,   growth:3.0,  gdp:900,    hdi:0.428, life:59.3, co2:0.3,  internet:32},
+  "484":{n:"Мексик",       pop:129,   density:66,   growth:0.9,  gdp:11300,  hdi:0.758, life:75.1, co2:3.8,  internet:78},
+  "496":{n:"Монгол",       pop:3.3,   density:2,    growth:1.5,  gdp:4500,   hdi:0.737, life:71.4, co2:7.6,  internet:82},
+  "504":{n:"Марокко",      pop:38,    density:80,   growth:1.1,  gdp:3700,   hdi:0.683, life:74.0, co2:1.9,  internet:88},
+  "508":{n:"Мозамбик",     pop:33,    density:42,   growth:2.9,  gdp:500,    hdi:0.456, life:61.2, co2:0.3,  internet:21},
+  "524":{n:"Непал",        pop:30,    density:215,  growth:0.9,  gdp:1200,   hdi:0.601, life:70.8, co2:0.4,  internet:63},
+  "528":{n:"Нидерланд",    pop:17.9,  density:508,  growth:0.5,  gdp:57400,  hdi:0.941, life:82.3, co2:9.1,  internet:96},
+  "554":{n:"Шинэ Зеланд",  pop:5.1,   density:19,   growth:1.4,  gdp:45600,  hdi:0.937, life:82.2, co2:7.7,  internet:93},
+  "562":{n:"Нигер",        pop:26,    density:20,   growth:3.8,  gdp:600,    hdi:0.394, life:62.4, co2:0.1,  internet:16},
+  "566":{n:"Нигери",       pop:224,   density:247,  growth:2.6,  gdp:2200,   hdi:0.535, life:54.7, co2:0.7,  internet:45},
+  "578":{n:"Норвег",       pop:5.5,   density:15,   growth:0.7,  gdp:108700, hdi:0.961, life:83.2, co2:7.5,  internet:99},
+  "586":{n:"Пакистан",     pop:245,   density:287,  growth:2.0,  gdp:1700,   hdi:0.544, life:67.1, co2:1.0,  internet:48},
+  "604":{n:"Перу",         pop:34,    density:26,   growth:1.2,  gdp:6900,   hdi:0.762, life:77.0, co2:2.0,  internet:73},
+  "608":{n:"Филиппин",     pop:117,   density:391,  growth:1.5,  gdp:3600,   hdi:0.699, life:72.7, co2:1.3,  internet:73},
+  "616":{n:"Польш",        pop:41,    density:128,  growth:-0.1, gdp:18200,  hdi:0.876, life:78.5, co2:9.1,  internet:86},
+  "620":{n:"Португал",     pop:10.2,  density:112,  growth:0.0,  gdp:24700,  hdi:0.866, life:82.1, co2:4.7,  internet:82},
+  "634":{n:"Катар",        pop:2.7,   density:238,  growth:1.6,  gdp:87400,  hdi:0.855, life:80.2, co2:32.4, internet:100},
+  "642":{n:"Румын",        pop:19,    density:84,   growth:-0.5, gdp:15200,  hdi:0.821, life:76.1, co2:4.4,  internet:86},
+  "643":{n:"Орос",         pop:144,   density:9,    growth:-0.2, gdp:12500,  hdi:0.822, life:72.6, co2:12.5, internet:88},
+  "646":{n:"Руанд",        pop:14.2,  density:572,  growth:2.5,  gdp:900,    hdi:0.534, life:69.0, co2:0.1,  internet:30},
+  "682":{n:"Саудын Арав",  pop:36,    density:17,   growth:1.7,  gdp:23800,  hdi:0.875, life:76.4, co2:18.7, internet:97},
+  "686":{n:"Сенегал",      pop:17.5,  density:91,   growth:2.7,  gdp:1600,   hdi:0.511, life:68.7, co2:0.7,  internet:46},
+  "706":{n:"Сомали",       pop:18.1,  density:29,   growth:2.9,  gdp:600,    hdi:0.361, life:57.4, co2:0.1,  internet:22},
+  "710":{n:"Өмнөд Африк",  pop:60,    density:49,   growth:1.3,  gdp:6400,   hdi:0.713, life:64.9, co2:8.0,  internet:72},
+  "724":{n:"Испани",       pop:47.4,  density:94,   growth:0.5,  gdp:30400,  hdi:0.905, life:83.5, co2:5.9,  internet:95},
+  "729":{n:"Судан",        pop:46,    density:24,   growth:2.6,  gdp:800,    hdi:0.508, life:65.1, co2:0.5,  internet:31},
+  "752":{n:"Швед",         pop:10.5,  density:25,   growth:0.7,  gdp:56900,  hdi:0.952, life:83.1, co2:4.0,  internet:97},
+  "756":{n:"Швейцари",     pop:8.8,   density:219,  growth:0.8,  gdp:92400,  hdi:0.962, life:84.0, co2:4.5,  internet:96},
+  "760":{n:"Сири",         pop:23,    density:125,  growth:0.9,  gdp:800,    hdi:0.577, life:72.7, co2:1.5,  internet:34},
+  "762":{n:"Тажикистан",   pop:10,    density:73,   growth:2.1,  gdp:1200,   hdi:0.685, life:71.4, co2:1.1,  internet:28},
+  "764":{n:"Тайланд",      pop:72,    density:140,  growth:0.2,  gdp:7800,   hdi:0.800, life:79.5, co2:4.6,  internet:89},
+  "768":{n:"Того",         pop:9,     density:160,  growth:2.6,  gdp:1000,   hdi:0.539, life:61.7, co2:0.4,  internet:23},
+  "788":{n:"Тунис",        pop:12,    density:78,   growth:0.9,  gdp:3900,   hdi:0.731, life:76.7, co2:2.9,  internet:68},
+  "792":{n:"Турк",         pop:85,    density:109,  growth:1.1,  gdp:12600,  hdi:0.838, life:78.6, co2:6.0,  internet:85},
+  "800":{n:"Уганда",       pop:48,    density:240,  growth:3.4,  gdp:900,    hdi:0.544, life:63.4, co2:0.2,  internet:26},
+  "804":{n:"Украйн",       pop:38,    density:79,   growth:-0.5, gdp:4500,   hdi:0.773, life:73.0, co2:4.9,  internet:79},
+  "784":{n:"АНЭ",          pop:10,    density:120,  growth:1.5,  gdp:47400,  hdi:0.911, life:78.7, co2:20.3, internet:100},
+  "826":{n:"Их Британи",   pop:68,    density:281,  growth:0.5,  gdp:46200,  hdi:0.929, life:81.3, co2:5.5,  internet:97},
+  "840":{n:"АНУ",          pop:341,   density:37,   growth:0.5,  gdp:76300,  hdi:0.926, life:79.1, co2:14.9, internet:92},
+  "858":{n:"Уругвай",      pop:3.6,   density:20,   growth:0.4,  gdp:18500,  hdi:0.830, life:78.0, co2:2.0,  internet:90},
+  "860":{n:"Узбекистан",   pop:36,    density:80,   growth:1.7,  gdp:2300,   hdi:0.727, life:75.7, co2:3.3,  internet:73},
+  "862":{n:"Венесуэл",     pop:28,    density:32,   growth:1.4,  gdp:3100,   hdi:0.691, life:72.0, co2:5.3,  internet:72},
+  "704":{n:"Вьетнам",      pop:98,    density:308,  growth:0.9,  gdp:4100,   hdi:0.703, life:75.6, co2:3.8,  internet:78},
+  "887":{n:"Йемен",        pop:34,    density:64,   growth:2.3,  gdp:800,    hdi:0.455, life:66.1, co2:0.4,  internet:31},
+  "894":{n:"Замби",        pop:20,    density:27,   growth:3.0,  gdp:1200,   hdi:0.565, life:63.9, co2:0.4,  internet:28},
+  "716":{n:"Зимбабве",     pop:16,    density:43,   growth:1.4,  gdp:1600,   hdi:0.571, life:61.2, co2:0.9,  internet:35},
+  "031":{n:"Азербайжан",   pop:10.2,  density:118,  growth:0.8,  gdp:6200,   hdi:0.745, life:73.0, co2:4.5,  internet:88},
+  "050":{n:"Бангладеш",    pop:172,   density:1265, growth:1.0,  gdp:2800,   hdi:0.661, life:72.4, co2:0.6,  internet:44},
+  "702":{n:"Сингапур",     pop:5.9,   density:8358, growth:0.9,  gdp:91100,  hdi:0.939, life:83.9, co2:7.9,  internet:96},
+  "554":{n:"Шинэ Зеланд",  pop:5.1,   density:19,   growth:1.4,  gdp:45600,  hdi:0.937, life:82.2, co2:7.7,  internet:93},
+  "703":{n:"Словак",       pop:5.5,   density:113,  growth:0.1,  gdp:21400,  hdi:0.848, life:77.8, co2:6.1,  internet:85},
+  "144":{n:"Шри Ланк",     pop:22,    density:341,  growth:0.6,  gdp:3800,   hdi:0.782, life:77.0, co2:1.0,  internet:58},
+  "417":{n:"Кыргызстан",   pop:6.8,   density:34,   growth:1.8,  gdp:1400,   hdi:0.697, life:72.6, co2:1.7,  internet:69},
+  "795":{n:"Туркменистан", pop:6.3,   density:13,   growth:1.5,  gdp:7900,   hdi:0.745, life:68.4, co2:11.8, internet:30},
+  "428":{n:"Латви",        pop:1.8,   density:28,   growth:-0.7, gdp:20500,  hdi:0.863, life:75.5, co2:3.8,  internet:91},
+  "440":{n:"Литва",        pop:2.8,   density:43,   growth:-1.0, gdp:24600,  hdi:0.875, life:76.0, co2:4.3,  internet:89},
+  "112":{n:"Беларусь",     pop:9.4,   density:46,   growth:-0.2, gdp:7400,   hdi:0.808, life:74.4, co2:6.7,  internet:81},
+  "498":{n:"Молдов",       pop:2.6,   density:77,   growth:-0.4, gdp:4200,   hdi:0.767, life:71.8, co2:2.0,  internet:76},
+  "188":{n:"Коста Рика",   pop:5.2,   density:102,  growth:0.9,  gdp:13100,  hdi:0.806, life:80.3, co2:1.7,  internet:83},
+  "222":{n:"Эль Салвадор", pop:6.3,   density:302,  growth:0.5,  gdp:4600,   hdi:0.675, life:73.3, co2:1.3,  internet:58},
+  "558":{n:"Никарагуа",    pop:6.8,   density:52,   growth:0.9,  gdp:2100,   hdi:0.667, life:74.5, co2:0.9,  internet:56},
+  "591":{n:"Панам",        pop:4.4,   density:59,   growth:1.6,  gdp:14200,  hdi:0.805, life:78.5, co2:2.9,  internet:65},
+  "320":{n:"Гватемал",     pop:18,    density:166,  growth:1.8,  gdp:4600,   hdi:0.627, life:74.3, co2:1.2,  internet:55},
+  "524":{n:"Непал",        pop:30,    density:215,  growth:0.9,  gdp:1200,   hdi:0.601, life:70.8, co2:0.4,  internet:63},
+};
+
+const TOTAL = 8119;
+let cat = 'pop';
+let selId = null;
+let wdata = null;
+let svg, g, proj, pathFn, zoom;
+let isMobile = () => window.innerWidth <= 700;
+
+// ── COLOR SCALE ──
+function getColor(id) {
+  const d = D[id]; if (!d) return '#060e1c';
+  const c = CATS[cat];
+  const v = d[cat];
+  if (v === undefined || v === null) return '#060e1c';
+  const scale = c.log
+    ? d3.scaleSequentialLog().domain([0.05, getMax()]).interpolator(d3.interpolateRgb(c.colorA, c.colorB))
+    : d3.scaleSequential().domain([getMin(), getMax()]).interpolator(d3.interpolateRgb(c.colorA, c.colorB));
+  try { return scale(Math.max(v, 0.05)); } catch(e) { return '#060e1c'; }
+}
+
+function getMax() {
+  return Math.max(...Object.values(D).map(d => d[cat]).filter(v => v !== undefined && v !== null));
+}
+function getMin() {
+  const vals = Object.values(D).map(d => d[cat]).filter(v => v !== undefined && v !== null);
+  return Math.min(...vals);
+}
+
+function fmtVal(v) { return CATS[cat].fmt(v); }
+
+// ── INIT MAP ──
+async function init() {
+  const area = document.getElementById('map-area');
+  const w = area.clientWidth, h = area.clientHeight;
+  svg = d3.select('#world-svg');
+  g = svg.append('g');
+
+  proj = d3.geoNaturalEarth1().scale(w/6.3).translate([w/2, h/2]);
+  pathFn = d3.geoPath().projection(proj);
+
+  g.append('path').datum({type:'Sphere'}).attr('class','sphere').attr('d', pathFn);
+  g.append('path').datum(d3.geoGraticule()()).attr('class','graticule').attr('d', pathFn);
+
+  zoom = d3.zoom().scaleExtent([0.7, 20]).on('zoom', e => g.attr('transform', e.transform));
+  svg.call(zoom);
+
+  try {
+    const res = await fetch('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json');
+    wdata = await res.json();
+    drawMap();
+    renderRankings();
+    animateHeader();
+    updateLegend();
+  } catch(e) {
+    console.error(e);
+    document.getElementById('map-area').innerHTML += '<div style="color:#ff5533;padding:20px;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%)">Газрын зураг ачаалагдсангүй. Интернет холболт шалгана уу.</div>';
+  }
+}
+
+function drawMap() {
+  if (!wdata) return;
+  g.selectAll('.cp').remove();
+  g.selectAll('.brd').remove();
+  const countries = topojson.feature(wdata, wdata.objects.countries).features;
+  g.selectAll('.cp').data(countries).enter().append('path')
+    .attr('class', d => `country-path cp ${String(d.id)===selId?'sel':''}`)
+    .attr('d', pathFn)
+    .attr('fill', d => getColor(String(d.id)))
+    .on('mouseover', function(e, d) {
+      if (isMobile()) return;
+      const pd = D[String(d.id)]; if (!pd) return;
+      document.getElementById('t-name').textContent = pd.n;
+      document.getElementById('t-val').textContent = fmtVal(pd[cat]);
+      document.getElementById('t-sub').textContent = CATS[cat].label + ' · ' + ((pd.pop/TOTAL)*100).toFixed(2)+'% хүн ам';
+      document.getElementById('tip').classList.add('show');
+    })
+    .on('mousemove', function(e) {
+      if (isMobile()) return;
+      const tip = document.getElementById('tip');
+      tip.style.left = Math.min(e.clientX+14, window.innerWidth-210)+'px';
+      tip.style.top = Math.max(e.clientY-65, 10)+'px';
+    })
+    .on('mouseleave', () => document.getElementById('tip').classList.remove('show'))
+    .on('click', function(e, d) {
+      const id = String(d.id);
+      selId = id;
+      g.selectAll('.cp').classed('sel', dd => String(dd.id)===id);
+      const pd = D[id];
+      showInfo(pd, id);
+      highlightRank(id);
+      if (isMobile()) openMobPanel(pd, id);
+    });
+
+  g.append('path')
+    .datum(topojson.mesh(wdata, wdata.objects.countries, (a,b)=>a!==b))
+    .attr('class','borders brd')
+    .attr('d', pathFn);
+}
+
+// ── INFO PANEL ──
+function infoHTML(pd, id) {
+  if (!pd) return '<div class="sb-empty">Мэдээлэл байхгүй</div>';
+  const pct = ((pd.pop/TOTAL)*100).toFixed(2);
+  return `
+    <div class="sb-name">${pd.n}</div>
+    <div class="sb-main">${fmtVal(pd[cat])}</div>
+    <div class="sb-unit">${CATS[cat].unit}</div>
+    <div class="sb-grid">
+      <div class="sb-kv">Хүн ам<span>${pd.pop>=1000?(pd.pop/1000).toFixed(2)+' тэрбум':pd.pop.toFixed(1)+' сая'}</span></div>
+      <div class="sb-kv">Нягтрал<span>${pd.density}/км²</span></div>
+      <div class="sb-kv">ДНБ/хүн<span>$${pd.gdp.toLocaleString()}</span></div>
+      <div class="sb-kv">HDI<span>${pd.hdi}</span></div>
+      <div class="sb-kv">Наслалт<span>${pd.life} жил</span></div>
+      <div class="sb-kv">CO₂<span>${pd.co2} тн</span></div>
+      <div class="sb-kv">Интернет<span>${pd.internet}%</span></div>
+      <div class="sb-kv">Хүн амын %<span>${pct}%</span></div>
+    </div>`;
+}
+
+function showInfo(pd, id) {
+  document.getElementById('sb-info').innerHTML = infoHTML(pd, id);
+}
+
+// ── MOBILE PANEL ──
+function openMobPanel(pd, id) {
+  const panel = document.getElementById('mob-panel');
+  if (!pd) return;
+  document.getElementById('mob-info').style.display = 'block';
+  document.getElementById('mob-name').textContent = pd.n;
+  document.getElementById('mob-val').textContent = fmtVal(pd[cat]);
+  document.getElementById('mob-grid').innerHTML = `
+    <div class="mob-kv">Хүн ам<span>${pd.pop>=1000?(pd.pop/1000).toFixed(2)+' тэрбум':pd.pop.toFixed(1)+' сая'}</span></div>
+    <div class="mob-kv">Нягтрал<span>${pd.density}/км²</span></div>
+    <div class="mob-kv">ДНБ/хүн<span>$${pd.gdp.toLocaleString()}</span></div>
+    <div class="mob-kv">HDI<span>${pd.hdi}</span></div>
+    <div class="mob-kv">Наслалт<span>${pd.life}жил</span></div>
+    <div class="mob-kv">CO₂<span>${pd.co2}тн</span></div>
+  `;
+  panel.style.display = 'flex';
+}
+
+function closeMobPanel() {
+  document.getElementById('mob-info').style.display = 'none';
+}
+
+// ── RANKINGS ──
+function renderRankings() {
+  const entries = Object.entries(D)
+    .filter(([,d]) => d[cat] !== undefined)
+    .sort((a,b) => b[1][cat] - a[1][cat])
+    .slice(0, 30);
+  const maxV = entries[0][1][cat];
+  const minV = entries[entries.length-1][1][cat];
+  const range = maxV - minV || 1;
+
+  const html = entries.map(([id, d], i) => {
+    const v = d[cat];
+    const pct = ((v - minV) / range * 100).toFixed(1);
+    const cc = i===0?'g':i===1?'s':i===2?'b':'';
+    const fillC = cat==='growth'&&v<0 ? 'var(--accent2)' : i<3 ? ['#ffd700','#c0c0c0','#cd7f32'][i] : 'var(--accent)';
+    return `<div class="rank-row ${id===selId?'active':''}" data-id="${id}" onclick="pickRank('${id}')">
+      <div class="rn ${cc}">${i+1}</div>
+      <div><div class="ri-name">${d.n}</div><div class="ri-bar"><div class="ri-fill" style="width:${pct}%;background:${fillC}"></div></div></div>
+      <div class="rval">${fmtVal(v)}</div>
+    </div>`;
+  }).join('');
+
+  document.getElementById('rank-list').innerHTML = html;
+  document.getElementById('mob-rank-list').innerHTML = html;
+  document.getElementById('sb-rank-title').textContent = `ТОП 30 · ${CATS[cat].label.toUpperCase()}`;
+}
+
+function pickRank(id) {
+  selId = id;
+  const pd = D[id];
+  showInfo(pd, id);
+  highlightRank(id);
+  if (wdata) g.selectAll('.cp').classed('sel', d => String(d.id)===id);
+  if (isMobile()) openMobPanel(pd, id);
+}
+
+function highlightRank(id) {
+  document.querySelectorAll('.rank-row').forEach(r => r.classList.toggle('active', r.dataset.id===id));
+}
+
+// ── LEGEND ──
+function updateLegend() {
+  const c = CATS[cat];
+  document.getElementById('leg-title').textContent = c.label;
+  document.getElementById('leg-grad').style.background = `linear-gradient(90deg,${c.colorA},${c.colorB})`;
+  const mn = getMin(), mx = getMax();
+  document.getElementById('leg-labels').innerHTML = `<span>${fmtVal(mn)}</span><span>${fmtVal(mx)}</span>`;
+  document.getElementById('h-lbl').textContent = c.header;
+  const topVal = Object.values(D).sort((a,b)=>b[cat]-a[cat])[0][cat];
+  document.getElementById('h-val').textContent = fmtVal(topVal);
+}
+
+// ── CAT SWITCH ──
+function setCat(c, btn) {
+  cat = c;
+  document.querySelectorAll('.cat-btn').forEach(b => b.classList.remove('on'));
+  btn.classList.add('on');
+  drawMap();
+  renderRankings();
+  updateLegend();
+  if (selId && D[selId]) { showInfo(D[selId], selId); if(isMobile()) openMobPanel(D[selId], selId); }
+}
+
+// ── PROJECTION ──
+function changeProjection(v) {
+  const area = document.getElementById('map-area');
+  const w = area.clientWidth, h = area.clientHeight;
+  const ps = {
+    natural: d3.geoNaturalEarth1().scale(w/6.3).translate([w/2,h/2]),
+    mercator: d3.geoMercator().scale(w/6.5).translate([w/2,h/1.55]),
+    ortho: d3.geoOrthographic().scale(Math.min(w,h)/2.2).translate([w/2,h/2]),
+    equal: d3.geoEqualEarth().scale(w/6.3).translate([w/2,h/2]),
+  };
+  proj = ps[v] || ps.natural;
+  pathFn = d3.geoPath().projection(proj);
+  svg.call(zoom.transform, d3.zoomIdentity);
+  g.select('.sphere').attr('d', pathFn({type:'Sphere'}));
+  g.select('.graticule').attr('d', pathFn(d3.geoGraticule()()));
+  drawMap();
+}
+
+function zoomIn() { svg.transition().call(zoom.scaleBy,1.6); }
+function zoomOut() { svg.transition().call(zoom.scaleBy,0.625); }
+function zoomReset() { svg.transition().call(zoom.transform, d3.zoomIdentity); }
+
+function animateHeader() {
+  const el = document.getElementById('h-val');
+  const c = CATS[cat]; const target = TOTAL*1e6;
+  if (cat !== 'pop') { updateLegend(); return; }
+  const dur=1600, start=Date.now();
+  const tick=()=>{
+    const p=Math.min((Date.now()-start)/dur,1), e=1-Math.pow(1-p,3);
+    el.textContent=(Math.round(e*target)).toLocaleString();
+    if(p<1) requestAnimationFrame(tick); else el.textContent='8,119,000,000';
+  };
+  tick();
+}
+
+window.addEventListener('resize', () => {
+  if (wdata) changeProjection(document.getElementById('proj-sel')?.value || 'natural');
+});
+
+init();
+</script>
+</body>
+</html>
